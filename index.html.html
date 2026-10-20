@@ -1,0 +1,1547 @@
+<!DOCTYPE html>
+<html lang="ja" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cessna 152 Six-Pack Flight Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #121316;
+            color: #e5e7eb;
+            user-select: none;
+            overflow-x: hidden;
+        }
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        /* Cockpit Panel Texture */
+        .panel-bg {
+            background-color: #1c1e24;
+            background-image: radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 0);
+            background-size: 8px 8px;
+            box-shadow: inset 0 0 40px rgba(0,0,0,0.8), 0 10px 25px rgba(0,0,0,0.9);
+            border: 2px solid #2d3139;
+        }
+        .instrument-bezel {
+            background: linear-gradient(145deg, #262930, #16181d);
+            border-radius: 16px;
+            box-shadow: 
+                6px 6px 14px #0d0e11, 
+                -4px -4px 10px #2b2f37,
+                inset 0 0 8px rgba(0,0,0,0.8);
+            border: 1px solid #323640;
+            position: relative;
+        }
+        /* Screw heads on corners of instruments */
+        .screw {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: radial-gradient(circle, #4a4e58 0%, #22252a 100%);
+            border: 1px solid #111;
+            position: absolute;
+            box-shadow: inset 0 1px 2px rgba(255,255,255,0.2);
+        }
+        .screw::after {
+            content: '';
+            position: absolute;
+            top: 4px;
+            left: 1px;
+            width: 6px;
+            height: 1px;
+            background: #111;
+            transform: rotate(35deg);
+        }
+        /* Custom Range Sliders */
+        input[type=range] {
+            -webkit-appearance: none;
+            background: #111317;
+            border-radius: 6px;
+            border: 1px solid #374151;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 20px;
+            width: 20px;
+            border-radius: 4px;
+            background: #e5e7eb;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+            border: 2px solid #4b5563;
+        }
+        .throttle-slider::-webkit-slider-thumb {
+            background: #1f2937 !important;
+            border: 2px solid #9ca3af !important;
+            height: 26px !important;
+            width: 32px !important;
+            border-radius: 6px !important;
+        }
+        @keyframes stall-blink {
+            0%, 100% { background-color: #ef4444; box-shadow: 0 0 20px #ef4444; color: #fff; }
+            50% { background-color: #450a0a; box-shadow: none; color: #fca5a5; }
+        }
+        .stall-active {
+            animation: stall-blink 0.35s infinite;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between p-2 md:p-4">
+
+    <!-- Top Header & Presets Bar -->
+    <header class="w-full max-w-7xl mx-auto mb-3 bg-gray-900/90 border border-gray-800 rounded-xl p-3 shadow-lg flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+            <div class="bg-red-600 text-white font-bold px-2.5 py-1 rounded text-sm tracking-wider shadow">C152</div>
+            <div>
+                <h1 class="text-base md:text-lg font-bold tracking-tight text-white leading-tight">CESSNA 152 SIX-PACK SIMULATOR</h1>
+                <p class="text-xs text-gray-400">Lycoming O-235-L2C (110 BHP / 2550 RPM) • Standard Atmosphere</p>
+            </div>
+        </div>
+
+        <!-- Flight Situation Presets -->
+        <div class="flex flex-wrap items-center gap-1.5">
+            <span class="text-xs font-semibold text-gray-400 mr-1">PRESETS:</span>
+            <button onclick="applyPreset('cruise')" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-xs font-medium rounded-lg border border-slate-600 transition shadow-sm">
+                ✈️ 巡航 (Cruise 95kt)
+            </button>
+            <button onclick="applyPreset('climb')" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-xs font-medium rounded-lg border border-slate-600 transition shadow-sm">
+                📈 上昇 ($V_Y$ 67kt)
+            </button>
+            <button onclick="applyPreset('approach')" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-xs font-medium rounded-lg border border-slate-600 transition shadow-sm">
+                🛬 アプローチ (Flaps 30° / 60kt)
+            </button>
+            <button onclick="applyPreset('turn')" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-xs font-medium rounded-lg border border-slate-600 transition shadow-sm">
+                🔄 標準旋回 (Std Rate Turn)
+            </button>
+            <button onclick="applyPreset('slow')" class="px-2.5 py-1.5 bg-amber-900/60 hover:bg-amber-800/70 text-amber-200 text-xs font-medium rounded-lg border border-amber-700 transition shadow-sm">
+                ⚠️ スローフライト (40kt)
+            </button>
+            <button id="audioToggleBtn" onclick="toggleAudio()" class="ml-1 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-gray-300 text-xs font-medium rounded-lg border border-zinc-600 transition" title="エンジン音・失速警報音のON/OFF">
+                🔇 音声 OFF
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Cockpit Area -->
+    <main class="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        
+        <!-- Left & Center: The Six-Pack Instrument Panel (8 cols on large screens) -->
+        <div class="lg:col-span-8 panel-bg rounded-2xl p-4 md:p-6 relative">
+            
+            <!-- Top Annunciator / Stall Warning Bar -->
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-4 pb-3 border-b border-gray-800">
+                <div class="flex items-center gap-3">
+                    <!-- Stall Warning Horn Indicator -->
+                    <div id="stallIndicator" class="px-3 py-1 rounded-md border border-red-900 bg-red-950/40 text-red-800 font-bold text-xs tracking-wider uppercase transition-all flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-current"></span>
+                        STALL HORN
+                    </div>
+                    <!-- Overspeed Warning Indicator -->
+                    <div id="vneIndicator" class="px-3 py-1 rounded-md border border-amber-900 bg-amber-950/30 text-amber-800 font-bold text-xs tracking-wider uppercase transition-all">
+                        OVERSPEED / FLAP LIMIT
+                    </div>
+                </div>
+
+                <!-- Live Digital Telemetry Readout for Precision Verification -->
+                <div class="flex flex-wrap items-center gap-3 text-xs mono bg-black/50 px-3 py-1.5 rounded-lg border border-gray-800">
+                    <div>IAS: <span id="teleIas" class="text-emerald-400 font-bold">95</span> kt</div>
+                    <div>ALT: <span id="teleAlt" class="text-sky-400 font-bold">3000</span> ft</div>
+                    <div>VSI: <span id="teleVsi" class="text-amber-400 font-bold">+0</span> fpm</div>
+                    <div>HDG: <span id="teleHdg" class="text-purple-400 font-bold">360</span>°</div>
+                    <div>AOA: <span id="teleAoa" class="text-gray-300">3.2</span>°</div>
+                </div>
+            </div>
+
+            <!-- 2x3 Grid for Six Pack -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-5">
+                
+                <!-- 1. Airspeed Indicator (ASI) -->
+                <div class="instrument-bezel p-3 flex flex-col items-center">
+                    <div class="screw top-2 left-2"></div>
+                    <div class="screw top-2 right-2"></div>
+                    <div class="screw bottom-2 left-2"></div>
+                    <div class="screw bottom-2 right-2"></div>
+                    <canvas id="asiCanvas" width="260" height="260" class="w-full max-w-[230px] aspect-square"></canvas>
+                    <span class="text-[11px] font-semibold tracking-wider text-gray-400 mt-1">AIRSPEED (KIAS)</span>
+                </div>
+
+                <!-- 2. Attitude Indicator (AI) -->
+                <div class="instrument-bezel p-3 flex flex-col items-center">
+                    <div class="screw top-2 left-2"></div>
+                    <div class="screw top-2 right-2"></div>
+                    <div class="screw bottom-2 left-2"></div>
+                    <div class="screw bottom-2 right-2"></div>
+                    <canvas id="aiCanvas" width="260" height="260" class="w-full max-w-[230px] aspect-square"></canvas>
+                    <span class="text-[11px] font-semibold tracking-wider text-gray-400 mt-1">ATTITUDE GYRO</span>
+                </div>
+
+                <!-- 3. Altimeter (ALT) -->
+                <div class="instrument-bezel p-3 flex flex-col items-center relative">
+                    <div class="screw top-2 left-2"></div>
+                    <div class="screw top-2 right-2"></div>
+                    <div class="screw bottom-2 left-2"></div>
+                    <div class="screw bottom-2 right-2"></div>
+                    <canvas id="altCanvas" width="260" height="260" class="w-full max-w-[230px] aspect-square"></canvas>
+                    <div class="w-full flex items-center justify-between px-2 mt-1">
+                        <span class="text-[11px] font-semibold tracking-wider text-gray-400">ALTIMETER</span>
+                        <div class="flex items-center gap-1 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-700 text-[10px] mono">
+                            <span class="text-gray-400">BARO</span>
+                            <button onclick="adjustKollsman(-0.02)" class="px-1 bg-zinc-800 hover:bg-zinc-700 rounded text-white">-</button>
+                            <span id="kollsmanVal" class="text-amber-300">29.92</span>
+                            <button onclick="adjustKollsman(0.02)" class="px-1 bg-zinc-800 hover:bg-zinc-700 rounded text-white">+</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. Turn Coordinator (TC) -->
+                <div class="instrument-bezel p-3 flex flex-col items-center">
+                    <div class="screw top-2 left-2"></div>
+                    <div class="screw top-2 right-2"></div>
+                    <div class="screw bottom-2 left-2"></div>
+                    <div class="screw bottom-2 right-2"></div>
+                    <canvas id="tcCanvas" width="260" height="260" class="w-full max-w-[230px] aspect-square"></canvas>
+                    <span class="text-[11px] font-semibold tracking-wider text-gray-400 mt-1">TURN COORDINATOR</span>
+                </div>
+
+                <!-- 5. Heading Indicator (HI) -->
+                <div class="instrument-bezel p-3 flex flex-col items-center">
+                    <div class="screw top-2 left-2"></div>
+                    <div class="screw top-2 right-2"></div>
+                    <div class="screw bottom-2 left-2"></div>
+                    <div class="screw bottom-2 right-2"></div>
+                    <canvas id="hiCanvas" width="260" height="260" class="w-full max-w-[230px] aspect-square"></canvas>
+                    <div class="w-full flex items-center justify-between px-2 mt-1">
+                        <span class="text-[11px] font-semibold tracking-wider text-gray-400">HEADING</span>
+                        <div class="flex items-center gap-1 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-700 text-[10px] mono">
+                            <span class="text-orange-400">BUG</span>
+                            <button onclick="adjustHdgBug(-5)" class="px-1 bg-zinc-800 hover:bg-zinc-700 rounded text-white">◀</button>
+                            <span id="hdgBugVal" class="text-orange-300">360°</span>
+                            <button onclick="adjustHdgBug(5)" class="px-1 bg-zinc-800 hover:bg-zinc-700 rounded text-white">▶</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 6. Vertical Speed Indicator (VSI) -->
+                <div class="instrument-bezel p-3 flex flex-col items-center">
+                    <div class="screw top-2 left-2"></div>
+                    <div class="screw top-2 right-2"></div>
+                    <div class="screw bottom-2 left-2"></div>
+                    <div class="screw bottom-2 right-2"></div>
+                    <canvas id="vsiCanvas" width="260" height="260" class="w-full max-w-[230px] aspect-square"></canvas>
+                    <span class="text-[11px] font-semibold tracking-wider text-gray-400 mt-1">VERTICAL SPEED (FPM)</span>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Right Column: Engine Tachometer, Flight Controls & V-Speeds Card (4 cols on large screens) -->
+        <div class="lg:col-span-4 flex flex-col gap-4">
+
+            <!-- Top Sub-Panel: Engine RPM & Interactive Yoke Pad -->
+            <div class="panel-bg rounded-2xl p-4 grid grid-cols-2 gap-3 items-center">
+                <!-- Tachometer (RPM) -->
+                <div class="instrument-bezel p-2.5 flex flex-col items-center">
+                    <div class="screw top-1.5 left-1.5"></div>
+                    <div class="screw top-1.5 right-1.5"></div>
+                    <div class="screw bottom-1.5 left-1.5"></div>
+                    <div class="screw bottom-1.5 right-1.5"></div>
+                    <canvas id="rpmCanvas" width="200" height="200" class="w-full max-w-[165px] aspect-square"></canvas>
+                    <span class="text-[10px] font-semibold tracking-wider text-gray-400 mt-1">TACHOMETER (RPM)</span>
+                </div>
+
+                <!-- 2D Interactive Yoke Pad (Pitch & Roll) -->
+                <div class="flex flex-col items-center">
+                    <div class="text-xs font-bold text-gray-300 mb-1 flex items-center justify-between w-full px-1">
+                        <span>YOKE (ドラッグ操作)</span>
+                        <button onclick="centerYoke()" class="text-[10px] bg-gray-800 hover:bg-gray-700 px-1.5 py-0.5 rounded border border-gray-600 text-gray-300">中央戻し</button>
+                    </div>
+                    <div id="yokePad" class="w-full aspect-square max-w-[165px] bg-zinc-950 rounded-xl border-2 border-zinc-700 relative cursor-crosshair overflow-hidden shadow-inner flex items-center justify-center">
+                        <!-- Crosshairs -->
+                        <div class="absolute inset-x-0 top-1/2 h-[1px] bg-zinc-800"></div>
+                        <div class="absolute inset-y-0 left-1/2 w-[1px] bg-zinc-800"></div>
+                        <div class="text-[9px] text-zinc-600 absolute top-1">PUSH (NOSE DN)</div>
+                        <div class="text-[9px] text-zinc-600 absolute bottom-1">PULL (NOSE UP)</div>
+                        <!-- Yoke Position Dot -->
+                        <div id="yokeCursor" class="w-6 h-6 rounded-full bg-amber-500/90 border-2 border-white shadow-lg pointer-events-none transform -translate-x-1/2 -translate-y-1/2 absolute" style="left: 50%; top: 50%;"></div>
+                    </div>
+                    <div class="flex justify-between w-full text-[10px] mono text-gray-400 mt-1 px-1">
+                        <span>PITCH: <b id="pitchReadout" class="text-white">+1.5°</b></span>
+                        <span>BANK: <b id="bankReadout" class="text-white">0.0°</b></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Primary Flight Controls Box -->
+            <div class="panel-bg rounded-2xl p-4 flex flex-col gap-3.5">
+                <h2 class="text-xs font-bold uppercase tracking-wider text-gray-400 border-b border-gray-800 pb-1.5 flex justify-between">
+                    <span>Flight & Engine Controls</span>
+                    <span class="text-[10px] text-gray-500 font-normal">矢印キー / W,S / Z,X 対応</span>
+                </h2>
+
+                <!-- Throttle Slider -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <label class="font-semibold text-gray-300">THROTTLE (スロットル) <span class="text-[10px] text-gray-500">[W/S]</span></label>
+                        <span id="throttleVal" class="mono font-bold text-emerald-400">75%</span>
+                    </div>
+                    <input id="throttleSlider" type="range" min="0" max="100" step="1" value="75" class="w-full h-3 throttle-slider">
+                </div>
+
+                <!-- Elevator / Pitch Trim Slider -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <label class="font-semibold text-gray-300">ELEVATOR / PITCH (ピッチ角) <span class="text-[10px] text-gray-500">[↑/↓]</span></label>
+                        <span id="elevVal" class="mono font-bold text-sky-400">+1.5°</span>
+                    </div>
+                    <input id="pitchSlider" type="range" min="-15" max="20" step="0.5" value="1.5" class="w-full h-2">
+                </div>
+
+                <!-- Aileron / Bank Slider -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <label class="font-semibold text-gray-300">AILERON / BANK (バンク角) <span class="text-[10px] text-gray-500">[←/→]</span></label>
+                        <span id="bankVal" class="mono font-bold text-sky-400">0.0°</span>
+                    </div>
+                    <input id="bankSlider" type="range" min="-60" max="60" step="1" value="0" class="w-full h-2">
+                </div>
+
+                <!-- Rudder Pedal Slider (Slip/Skid Control) -->
+                <div>
+                    <div class="flex justify-between items-center text-xs mb-1">
+                        <label class="font-semibold text-gray-300">RUDDER PEDALS (ラダー) <span class="text-[10px] text-gray-500">[Z/X]</span></label>
+                        <div class="flex items-center gap-2">
+                            <button id="autoCoordBtn" onclick="toggleAutoCoord()" class="text-[10px] px-2 py-0.5 rounded bg-zinc-800 border border-zinc-600 text-gray-300 hover:bg-zinc-700">
+                                手動ラダー (練習モード)
+                            </button>
+                            <span id="rudderVal" class="mono font-bold text-amber-400">0%</span>
+                        </div>
+                    </div>
+                    <input id="rudderSlider" type="range" min="-100" max="100" step="2" value="0" class="w-full h-2">
+                    <div class="flex justify-between text-[10px] text-gray-500 mt-0.5">
+                        <span>◀ Left Rudder [Z]</span>
+                        <span class="text-gray-400">Step on the Ball!</span>
+                        <span>Right Rudder [X] ▶</span>
+                    </div>
+                </div>
+
+                <!-- Wing Flaps Selector (0 / 10 / 20 / 30 deg) -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1.5">
+                        <label class="font-semibold text-gray-300">WING FLAPS (フラップ展開: 白アーク 85kt以下)</label>
+                        <span id="flapsLabel" class="mono font-bold text-white">0° (UP)</span>
+                    </div>
+                    <div class="grid grid-cols-4 gap-2">
+                        <button onclick="setFlaps(0)" id="flapBtn0" class="py-1.5 rounded-lg font-bold text-xs border transition bg-emerald-600 text-white border-emerald-400 shadow">0°</button>
+                        <button onclick="setFlaps(10)" id="flapBtn10" class="py-1.5 rounded-lg font-bold text-xs border transition bg-zinc-800 text-gray-300 border-zinc-700 hover:bg-zinc-700">10°</button>
+                        <button onclick="setFlaps(20)" id="flapBtn20" class="py-1.5 rounded-lg font-bold text-xs border transition bg-zinc-800 text-gray-300 border-zinc-700 hover:bg-zinc-700">20°</button>
+                        <button onclick="setFlaps(30)" id="flapBtn30" class="py-1.5 rounded-lg font-bold text-xs border transition bg-zinc-800 text-gray-300 border-zinc-700 hover:bg-zinc-700">30°</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cessna 152 V-Speeds Reference Placard -->
+            <div class="panel-bg rounded-2xl p-3.5 border border-zinc-700/80">
+                <div class="flex items-center justify-between border-b border-gray-800 pb-1.5 mb-2">
+                    <h3 class="text-xs font-bold tracking-wider uppercase text-amber-400">📋 CESSNA 152 POH V-SPEEDS (KIAS)</h3>
+                    <span class="text-[10px] text-gray-400 mono">Max Wt: 1,670 lbs</span>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div class="bg-zinc-900/90 p-2 rounded border border-zinc-800">
+                        <div class="text-[10px] text-gray-400">$V_{SO}$ (失速 Flaps 30°)</div>
+                        <div class="mono font-bold text-white text-sm">35 <span class="text-[10px] font-normal text-gray-400">kt</span></div>
+                    </div>
+                    <div class="bg-zinc-900/90 p-2 rounded border border-zinc-800">
+                        <div class="text-[10px] text-gray-400">$V_{S1}$ (失速 Flaps 0°)</div>
+                        <div class="mono font-bold text-emerald-400 text-sm">40 <span class="text-[10px] font-normal text-gray-400">kt</span></div>
+                    </div>
+                    <div class="bg-zinc-900/90 p-2 rounded border border-zinc-800">
+                        <div class="text-[10px] text-gray-400">$V_X$ (最急上昇角)</div>
+                        <div class="mono font-bold text-sky-300 text-sm">55 <span class="text-[10px] font-normal text-gray-400">kt</span></div>
+                    </div>
+                    <div class="bg-zinc-900/90 p-2 rounded border border-zinc-800">
+                        <div class="text-[10px] text-gray-400">$V_Y$ (最良上昇率)</div>
+                        <div class="mono font-bold text-sky-400 text-sm">67 <span class="text-[10px] font-normal text-gray-400">kt</span></div>
+                    </div>
+                    <div class="bg-zinc-900/90 p-2 rounded border border-zinc-800">
+                        <div class="text-[10px] text-gray-400">$V_{FE}$ (フラップ上限)</div>
+                        <div class="mono font-bold text-white text-sm">85 <span class="text-[10px] font-normal text-gray-400">kt</span></div>
+                    </div>
+                    <div class="bg-zinc-900/90 p-2 rounded border border-zinc-800">
+                        <div class="text-[10px] text-gray-400">$V_A$ (設計運動速度)</div>
+                        <div class="mono font-bold text-amber-300 text-sm">104 <span class="text-[10px] font-normal text-gray-400">kt</span></div>
+                    </div>
+                    <div class="bg-zinc-900/90 p-2 rounded border border-zinc-800">
+                        <div class="text-[10px] text-gray-400">$V_{NO}$ (構造巡航上限)</div>
+                        <div class="mono font-bold text-yellow-400 text-sm">111 <span class="text-[10px] font-normal text-gray-400">kt</span></div>
+                    </div>
+                    <div class="bg-zinc-900/90 p-2 rounded border border-zinc-800">
+                        <div class="text-[10px] text-gray-400">$V_{NE}$ (超過禁止速度)</div>
+                        <div class="mono font-bold text-red-500 text-sm">149 <span class="text-[10px] font-normal text-gray-400">kt</span></div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        // ============================================================================
+        // CESSNA 152 FLIGHT DYNAMICS & STATE MODEL
+        // ============================================================================
+        const state = {
+            // Flight Parameters
+            ias: 95.0,           // Indicated Airspeed (Knots)
+            alt: 3000.0,         // True Altitude (Feet)
+            vsi: 0.0,            // Vertical Speed (Feet per minute)
+            pitch: 1.5,          // Pitch Attitude (Degrees, positive = nose up)
+            targetPitch: 1.5,
+            bank: 0.0,           // Roll Bank Angle (Degrees, positive = right bank)
+            targetBank: 0.0,
+            heading: 360.0,      // Magnetic Heading (Degrees 1-360)
+            headingBug: 360,     // Heading Bug on DG
+            turnRate: 0.0,       // Turn Rate (Degrees per second; 3.0 deg/s = Standard Rate Turn)
+            slipBall: 0.0,       // Inclinometer Ball deflection (-1.0 left to +1.0 right)
+
+            // Controls & Engine
+            throttle: 0.75,      // 0.0 to 1.0
+            rudder: 0.0,         // -1.0 (left) to +1.0 (right)
+            flaps: 0,            // 0, 10, 20, 30 degrees
+            targetFlaps: 0,
+            rpm: 2300,           // Engine RPM (Lycoming O-235-L2C: Max continuous 2550 RPM)
+            kollsman: 29.92,     // Altimeter barometric setting (inHg)
+
+            // Derived & Warnings
+            aoa: 3.0,            // Angle of Attack (degrees)
+            isStallWarning: false,
+            isStalled: false,
+            autoCoord: false,    // Manual rudder by default so user can practice "Step on the ball"
+        };
+
+        // Sound Synthesizer (Tone.js) for Stall Warning Horn & Engine Hum
+        let audioEnabled = false;
+        let stallOsc = null;
+        let engineOsc = null;
+        let engineGain = null;
+
+        async function toggleAudio() {
+            const btn = document.getElementById('audioToggleBtn');
+            if (!audioEnabled) {
+                await Tone.start();
+                // Engine low frequency hum
+                engineGain = new Tone.Gain(0.06).toDestination();
+                engineOsc = new Tone.Oscillator(75, "sawtooth").connect(engineGain).start();
+                
+                // Stall horn high-pitched reed sound
+                stallOsc = new Tone.Oscillator(980, "square").toDestination();
+                stallOsc.volume.value = -14;
+                
+                audioEnabled = true;
+                btn.innerHTML = "🔊 音声 ON";
+                btn.classList.replace('bg-zinc-800', 'bg-emerald-800');
+            } else {
+                if (engineOsc) engineOsc.stop();
+                if (stallOsc) stallOsc.stop();
+                audioEnabled = false;
+                btn.innerHTML = "🔇 音声 OFF";
+                btn.classList.replace('bg-emerald-800', 'bg-zinc-800');
+            }
+        }
+
+        // ============================================================================
+        // PHYSICS UPDATE LOOP (60 FPS)
+        // ============================================================================
+        let lastTime = performance.now();
+
+        function updatePhysics(now) {
+            const dt = Math.min((now - lastTime) / 1000, 0.1);
+            lastTime = now;
+
+            // Smooth interpolation of control surfaces
+            state.pitch += (state.targetPitch - state.pitch) * Math.min(1, dt * 6);
+            state.bank += (state.targetBank - state.bank) * Math.min(1, dt * 6);
+            state.flaps += (state.targetFlaps - state.flaps) * Math.min(1, dt * 2.5);
+
+            const bankRad = state.bank * Math.PI / 180;
+            const cosBank = Math.cos(bankRad);
+            const sinBank = Math.sin(bankRad);
+
+            // 1. Fixed-Pitch Propeller RPM Model (Cessna 152 Lycoming O-235)
+            // Idle ~650 RPM. Static full throttle ~2350 RPM. Unloads in flight up to 2550+ RPM.
+            const staticRpm = 650 + state.throttle * 1680;
+            const airspeedUnload = Math.max(0, state.ias - 30) * (1.2 + state.throttle * 2.4);
+            const targetRpm = Math.min(2750, staticRpm + airspeedUnload);
+            state.rpm += (targetRpm - state.rpm) * Math.min(1, dt * 5);
+
+            // 2. Aerodynamic Forces & Airspeed Update
+            // Thrust proportional to RPM above idle
+            const thrustPower = Math.pow(Math.max(0, (state.rpm - 650) / 1900), 1.35);
+            const thrustAccel = thrustPower * 19.5; // Knots/sec equivalent force
+
+            // Parasite Drag + Flap Drag + Induced Drag (increases with Bank & high Pitch)
+            const flapDragFactor = 1.0 + (state.flaps / 30) * 0.55;
+            const loadFactor = 1.0 / Math.max(0.35, Math.abs(cosBank));
+            const parasiteDrag = 0.00175 * (state.ias * state.ias) * flapDragFactor;
+            const inducedDrag = (120 / Math.max(28, state.ias)) * (loadFactor * loadFactor - 0.85) * 0.15;
+
+            // Gravity component along flight path (Pitching down accelerates, pitching up decelerates)
+            // Nose-up pitch induced by flaps extension in C152
+            const effectivePitch = state.pitch + (state.flaps / 30) * 1.2;
+            const gravityAccel = -effectivePitch * 1.32;
+
+            // Net acceleration on Indicated Airspeed
+            const iasDot = thrustAccel - parasiteDrag - inducedDrag + gravityAccel;
+            state.ias = Math.max(22, Math.min(162, state.ias + iasDot * dt));
+
+            // 3. Stall Speed & Angle of Attack (AOA)
+            // V_S1 (0 flaps) = 40 KIAS, V_SO (30 flaps) = 35 KIAS
+            // Stall speed increases with sqrt(Load Factor) in a banked turn!
+            const baseStallSpeed = 40.0 - (state.flaps / 30.0) * 5.0;
+            const currentStallSpeed = baseStallSpeed * Math.sqrt(loadFactor);
+
+            // Stall warning horn triggers ~5 to 7 knots above actual stall speed in C152
+            state.isStallWarning = state.ias <= (currentStallSpeed + 5.5);
+            state.isStalled = state.ias <= currentStallSpeed;
+
+            // Approximate Angle of Attack for telemetry
+            state.aoa = effectivePitch - (state.vsi / Math.max(40, state.ias)) * 0.055;
+
+            // 4. Vertical Speed (VSI) & Altitude Calculation
+            // Lift depends on airspeed vs stall speed, pitch attitude, flaps, and bank angle loss of vertical lift
+            const speedRatio = state.ias / 75.0;
+            const flapLiftBonus = (state.flaps / 30.0) * 180;
+            const turnSinkPenalty = (1.0 - cosBank) * 1450; // Banking without adding back-pressure drops the nose/altitude
+
+            let targetVsi = (effectivePitch - 1.5) * 245 * Math.min(1.4, speedRatio)
+                            + (thrustPower - 0.63) * 720
+                            + flapLiftBonus
+                            - turnSinkPenalty;
+
+            // If stalled, the nose drops and high sink rate develops
+            if (state.isStalled) {
+                targetVsi = -1200 - (currentStallSpeed - state.ias) * 180;
+                // Gentle automatic buffet/nose drop during stall
+                state.pitch -= 3.5 * dt;
+            }
+
+            targetVsi = Math.max(-2000, Math.min(2000, targetVsi));
+            // VSI lag simulation
+            state.vsi += (targetVsi - state.vsi) * Math.min(1, dt * 3.5);
+
+            // Update Altitude (Feet)
+            state.alt = Math.max(0, state.alt + (state.vsi / 60.0) * dt);
+
+            // 5. Turn Rate & Slip/Skid Ball Physics
+            // Standard Turn Rate Formula: Rate (deg/sec) = (1091 * tan(bank)) / TAS
+            const tanBank = Math.tan(bankRad);
+            const idealTurnRate = (1091 * tanBank) / Math.max(35, state.ias);
+            // Rudder yaw contribution
+            const rudderYawRate = state.rudder * 4.5;
+            state.turnRate = idealTurnRate + rudderYawRate * 0.4;
+
+            // Update Heading (0 - 360 deg)
+            state.heading = (state.heading + state.turnRate * dt) % 360;
+            if (state.heading <= 0) state.heading += 360;
+
+            // Slip / Skid Ball ("Step on the ball")
+            // In a right bank (bank > 0), gravity pulls the ball right (+), while centrifugal force pushes it left (-).
+            // Moreover, high engine power / low airspeed (climb) creates P-factor requiring right rudder.
+            const pFactorNeedsRightRudder = (thrustPower * 0.22) * Math.max(0, (85 - state.ias) / 50);
+            const requiredRudder = (sinBank * 0.45) + pFactorNeedsRightRudder;
+
+            if (state.autoCoord) {
+                state.rudder = Math.max(-1, Math.min(1, requiredRudder));
+                document.getElementById('rudderSlider').value = Math.round(state.rudder * 100);
+                document.getElementById('rudderVal').textContent = `${Math.round(state.rudder * 100)}%`;
+            }
+
+            // If rudder < requiredRudder during right turn -> ball falls to the right (Slip)
+            // If rudder > requiredRudder -> ball is thrown to the left (Skid)
+            const targetBall = Math.max(-1.0, Math.min(1.0, (requiredRudder - state.rudder) * 1.8));
+            state.slipBall += (targetBall - state.slipBall) * Math.min(1, dt * 6);
+
+            // 6. Update UI Warnings & Sound
+            updateWarningsAndTelemetry();
+        }
+
+        function updateWarningsAndTelemetry() {
+            // Digital Telemetry Bar
+            document.getElementById('teleIas').textContent = Math.round(state.ias);
+            document.getElementById('teleAlt').textContent = Math.round(getIndicatedAltitude());
+            const vsiRound = Math.round(state.vsi / 10) * 10;
+            document.getElementById('teleVsi').textContent = (vsiRound >= 0 ? '+' : '') + vsiRound;
+            document.getElementById('teleHdg').textContent = String(Math.round(state.heading)).padStart(3, '0');
+            document.getElementById('teleAoa').textContent = state.aoa.toFixed(1);
+
+            // Yoke Readout & Cursor Position
+            document.getElementById('pitchReadout').textContent = (state.pitch >= 0 ? '+' : '') + state.pitch.toFixed(1) + '°';
+            document.getElementById('bankReadout').textContent = (state.bank >= 0 ? '+' : '') + state.bank.toFixed(1) + '°';
+            
+            const cursor = document.getElementById('yokeCursor');
+            // Map bank (-60..60) to 0..100% X, and pitch (-15..20) to 0..100% Y (pulling back = down on screen)
+            const xPct = 50 + (state.bank / 60) * 45;
+            const yPct = 50 + (state.pitch / 20) * 45;
+            cursor.style.left = `${Math.max(8, Math.min(92, xPct))}%`;
+            cursor.style.top = `${Math.max(8, Math.min(92, yPct))}%`;
+
+            // Stall Warning Indicator
+            const stallEl = document.getElementById('stallIndicator');
+            if (state.isStallWarning) {
+                stallEl.classList.add('stall-active');
+                stallEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-white"></span> ${state.isStalled ? 'STALL! (失速中)' : 'STALL WARNING (失速警報)'}`;
+                if (audioEnabled && stallOsc && stallOsc.state !== 'started') {
+                    stallOsc.start();
+                }
+            } else {
+                stallEl.classList.remove('stall-active');
+                stallEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-current"></span> STALL HORN`;
+                if (audioEnabled && stallOsc && stallOsc.state === 'started') {
+                    stallOsc.stop();
+                }
+            }
+
+            // Overspeed ($V_{NE}$ 149kt) or Flap Overspeed ($V_{FE}$ 85kt)
+            const vneEl = document.getElementById('vneIndicator');
+            const flapOverspeed = state.flaps > 1 && state.ias > 85;
+            const vneOverspeed = state.ias >= 149;
+            if (vneOverspeed || flapOverspeed) {
+                vneEl.className = "px-3 py-1 rounded-md border border-amber-400 bg-amber-600 text-white font-bold text-xs tracking-wider uppercase animate-pulse";
+                vneEl.textContent = vneOverspeed ? "⚠️ VNE EXCEEDED (149 KT!)" : "⚠️ FLAP OVERSPEED (>85 KT)";
+            } else {
+                vneEl.className = "px-3 py-1 rounded-md border border-amber-900 bg-amber-950/30 text-amber-800 font-bold text-xs tracking-wider uppercase";
+                vneEl.textContent = "OVERSPEED / FLAP LIMIT";
+            }
+
+            // Update Engine Audio Pitch
+            if (audioEnabled && engineOsc) {
+                engineOsc.frequency.value = 35 + (state.rpm / 2550) * 85;
+            }
+        }
+
+        function getIndicatedAltitude() {
+            // 1.00 inHg change in Kollsman window = ~1,000 ft change in indicated altitude
+            return state.alt + (state.kollsman - 29.92) * 1000;
+        }
+
+        // ============================================================================
+        // CANVAS INSTRUMENT RENDERING FUNCTIONS
+        // ============================================================================
+
+        // Helper: Draw outer instrument ring and glass reflection
+        function drawInstrumentFrame(ctx, cx, cy, r) {
+            ctx.save();
+            // Outer metallic rim
+            const rimGrad = ctx.createLinearGradient(0, 0, cx * 2, cy * 2);
+            rimGrad.addColorStop(0, '#3a3f4b');
+            rimGrad.addColorStop(1, '#14161a');
+            ctx.beginPath();
+            ctx.arc(cx, cy, r + 6, 0, Math.PI * 2);
+            ctx.fillStyle = rimGrad;
+            ctx.fill();
+
+            // Inner dial face
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.fillStyle = '#0f1115';
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawNeedle(ctx, cx, cy, angleRad, length, tailLength, width, color = '#ffffff') {
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(angleRad);
+
+            // Drop shadow
+            ctx.shadowColor = 'rgba(0,0,0,0.65)';
+            ctx.shadowBlur = 5;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+
+            ctx.beginPath();
+            ctx.moveTo(-tailLength, -width * 0.6);
+            ctx.lineTo(length - 12, -width * 0.5);
+            ctx.lineTo(length, 0);
+            ctx.lineTo(length - 12, width * 0.5);
+            ctx.lineTo(-tailLength, width * 0.6);
+            ctx.closePath();
+            ctx.fillStyle = color;
+            ctx.fill();
+
+            // Center cap
+            ctx.beginPath();
+            ctx.arc(0, 0, width * 1.4, 0, Math.PI * 2);
+            ctx.fillStyle = '#262930';
+            ctx.fill();
+            ctx.strokeStyle = '#525866';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        // ----------------------------------------------------------------------------
+        // 1. AIRSPEED INDICATOR (ASI) - Cessna 152 V-Speeds
+        // ----------------------------------------------------------------------------
+        const asiCanvas = document.getElementById('asiCanvas');
+        const asiCtx = asiCanvas.getContext('2d');
+
+        // Map knots (0 to 160) to angle in radians (0 deg is at top = -PI/2)
+        function ktsToAngle(kts) {
+            const clamped = Math.max(0, Math.min(160, kts));
+            // Non-linear start up to 40 kt, then linear 40 to 160 kt
+            let deg;
+            if (clamped <= 30) {
+                deg = (clamped / 30) * 25;
+            } else {
+                deg = 25 + ((clamped - 30) / 130) * 305;
+            }
+            return (deg - 90) * (Math.PI / 180);
+        }
+
+        function renderASI() {
+            const ctx = asiCtx;
+            const cx = 130, cy = 130, r = 115;
+            ctx.clearRect(0, 0, 260, 260);
+            drawInstrumentFrame(ctx, cx, cy, r);
+
+            // Draw Color Arcs (Cessna 152 Exact POH Specs)
+            // Green Arc: VS1 (40 kt) to VNO (111 kt)
+            ctx.beginPath();
+            ctx.arc(cx, cy, r - 11, ktsToAngle(40), ktsToAngle(111));
+            ctx.strokeStyle = '#10b981'; // Green
+            ctx.lineWidth = 8;
+            ctx.stroke();
+
+            // Yellow Arc: VNO (111 kt) to VNE (149 kt)
+            ctx.beginPath();
+            ctx.arc(cx, cy, r - 11, ktsToAngle(111), ktsToAngle(149));
+            ctx.strokeStyle = '#facc15'; // Yellow
+            ctx.lineWidth = 8;
+            ctx.stroke();
+
+            // White Arc (Inner band): VSO (35 kt) to VFE (85 kt)
+            ctx.beginPath();
+            ctx.arc(cx, cy, r - 18, ktsToAngle(35), ktsToAngle(85));
+            ctx.strokeStyle = '#f8fafc'; // White
+            ctx.lineWidth = 5;
+            ctx.stroke();
+
+            // Red Line: VNE (149 kt)
+            const vneAngle = ktsToAngle(149);
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(vneAngle);
+            ctx.beginPath();
+            ctx.moveTo(r - 24, 0);
+            ctx.lineTo(r - 2, 0);
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 4;
+            ctx.stroke();
+            ctx.restore();
+
+            // Tick Marks & Labels (40 to 160 knots)
+            ctx.fillStyle = '#f3f4f6';
+            ctx.font = 'bold 15px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            for (let k = 30; k <= 160; k += 5) {
+                const ang = ktsToAngle(k);
+                const isMajor = (k % 20 === 0 && k >= 40);
+                const isMed = (k % 10 === 0);
+                const innerR = isMajor ? r - 24 : (isMed ? r - 20 : r - 15);
+
+                ctx.beginPath();
+                ctx.moveTo(cx + Math.cos(ang) * innerR, cy + Math.sin(ang) * innerR);
+                ctx.lineTo(cx + Math.cos(ang) * (r - 4), cy + Math.sin(ang) * (r - 4));
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = isMajor ? 2.5 : 1.2;
+                ctx.stroke();
+
+                if (isMajor) {
+                    const tx = cx + Math.cos(ang) * (r - 40);
+                    const ty = cy + Math.sin(ang) * (r - 40);
+                    ctx.fillText(k.toString(), tx, ty);
+                }
+            }
+
+            // Dial Title
+            ctx.font = 'bold 11px Inter, sans-serif';
+            ctx.fillStyle = '#9ca3af';
+            ctx.fillText('AIRSPEED', cx, cy - 32);
+            ctx.fillText('KNOTS', cx, cy + 38);
+
+            // Needle
+            drawNeedle(ctx, cx, cy, ktsToAngle(state.ias), r - 12, 22, 4.5, '#ffffff');
+        }
+
+        // ----------------------------------------------------------------------------
+        // 2. ATTITUDE INDICATOR (AI / Artificial Horizon)
+        // ----------------------------------------------------------------------------
+        const aiCanvas = document.getElementById('aiCanvas');
+        const aiCtx = aiCanvas.getContext('2d');
+
+        function renderAI() {
+            const ctx = aiCtx;
+            const cx = 130, cy = 130, r = 115;
+            ctx.clearRect(0, 0, 260, 260);
+            drawInstrumentFrame(ctx, cx, cy, r);
+
+            // Clip to circular instrument face
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(cx, cy, r - 2, 0, Math.PI * 2);
+            ctx.clip();
+
+            // Rotate by negative bank angle and shift vertically by pitch
+            const bankRad = -state.bank * (Math.PI / 180);
+            const pitchPx = state.pitch * 3.4; // 3.4 pixels per degree of pitch
+
+            ctx.translate(cx, cy);
+            ctx.rotate(bankRad);
+
+            // Sky (Top)
+            ctx.fillStyle = '#1e78b4';
+            ctx.fillRect(-r * 2, -r * 3 + pitchPx, r * 4, r * 3);
+
+            // Ground (Bottom)
+            ctx.fillStyle = '#784828';
+            ctx.fillRect(-r * 2, pitchPx, r * 4, r * 3);
+
+            // Horizon Line
+            ctx.beginPath();
+            ctx.moveTo(-r * 1.5, pitchPx);
+            ctx.lineTo(r * 1.5, pitchPx);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+
+            // Pitch Ladder Lines (5, 10, 15, 20 deg up and down)
+            ctx.strokeStyle = '#ffffff';
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            for (let deg = -20; deg <= 20; deg += 5) {
+                if (deg === 0) continue;
+                const y = pitchPx - deg * 3.4;
+                const halfW = (Math.abs(deg) % 10 === 0) ? 26 : 13;
+
+                ctx.beginPath();
+                ctx.moveTo(-halfW, y);
+                ctx.lineTo(halfW, y);
+                ctx.lineWidth = (Math.abs(deg) % 10 === 0) ? 2 : 1.5;
+                ctx.stroke();
+
+                if (Math.abs(deg) % 10 === 0) {
+                    ctx.fillText(Math.abs(deg).toString(), -halfW - 12, y);
+                    ctx.fillText(Math.abs(deg).toString(), halfW + 12, y);
+                }
+            }
+
+            // Outer Rotating Bank Scale Ring & Sky Pointer
+            ctx.strokeStyle = '#ffffff';
+            const bankTicks = [-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60];
+            bankTicks.forEach(b => {
+                const rad = (b - 90) * (Math.PI / 180);
+                const len = (b % 30 === 0) ? 12 : 7;
+                ctx.beginPath();
+                ctx.moveTo(Math.cos(rad) * (r - 4), Math.sin(rad) * (r - 4));
+                ctx.lineTo(Math.cos(rad) * (r - 4 - len), Math.sin(rad) * (r - 4 - len));
+                ctx.lineWidth = (b % 30 === 0) ? 2.5 : 1.5;
+                ctx.stroke();
+            });
+
+            ctx.restore(); // Restore from horizon rotation
+
+            // Fixed Bank Index Triangle at top
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.beginPath();
+            ctx.moveTo(0, -(r - 16));
+            ctx.lineTo(-6, -(r - 26));
+            ctx.lineTo(6, -(r - 26));
+            ctx.closePath();
+            ctx.fillStyle = '#f97316';
+            ctx.fill();
+
+            // Fixed Miniature Airplane (Yellow/Orange gull-wing bars + center dot)
+            ctx.strokeStyle = '#f97316';
+            ctx.lineWidth = 4.5;
+            ctx.lineCap = 'round';
+
+            // Left wing
+            ctx.beginPath();
+            ctx.moveTo(-48, 0);
+            ctx.lineTo(-16, 0);
+            ctx.lineTo(-16, 7);
+            ctx.stroke();
+
+            // Right wing
+            ctx.beginPath();
+            ctx.moveTo(48, 0);
+            ctx.lineTo(16, 0);
+            ctx.lineTo(16, 7);
+            ctx.stroke();
+
+            // Center dot
+            ctx.beginPath();
+            ctx.arc(0, 0, 4.5, 0, Math.PI * 2);
+            ctx.fillStyle = '#f97316';
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // ----------------------------------------------------------------------------
+        // 3. ALTIMETER (ALT) - 3-Pointer & Kollsman Window
+        // ----------------------------------------------------------------------------
+        const altCanvas = document.getElementById('altCanvas');
+        const altCtx = altCanvas.getContext('2d');
+
+        function renderALT() {
+            const ctx = altCtx;
+            const cx = 130, cy = 130, r = 115;
+            ctx.clearRect(0, 0, 260, 260);
+            drawInstrumentFrame(ctx, cx, cy, r);
+
+            const indAlt = Math.max(0, getIndicatedAltitude());
+
+            // 50 Ticks around perimeter (0 to 9 major numbers)
+            ctx.fillStyle = '#f3f4f6';
+            ctx.font = 'bold 17px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            for (let i = 0; i < 50; i++) {
+                const ang = (i / 50) * Math.PI * 2 - Math.PI / 2;
+                const isMajor = (i % 5 === 0);
+                const innerR = isMajor ? r - 22 : r - 12;
+
+                ctx.beginPath();
+                ctx.moveTo(cx + Math.cos(ang) * innerR, cy + Math.sin(ang) * innerR);
+                ctx.lineTo(cx + Math.cos(ang) * (r - 3), cy + Math.sin(ang) * (r - 3));
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = isMajor ? 2.5 : 1.3;
+                ctx.stroke();
+
+                if (isMajor) {
+                    const num = i / 5;
+                    const tx = cx + Math.cos(ang) * (r - 38);
+                    const ty = cy + Math.sin(ang) * (r - 38);
+                    ctx.fillText(num.toString(), tx, ty);
+                }
+            }
+
+            // Labels
+            ctx.font = 'bold 11px Inter, sans-serif';
+            ctx.fillStyle = '#9ca3af';
+            ctx.fillText('ALT', cx, cy - 34);
+            ctx.font = '10px Inter, sans-serif';
+            ctx.fillText('100 FEET', cx, cy + 40);
+
+            // Kollsman Window Box on the right (3 o'clock position)
+            ctx.fillStyle = '#050608';
+            ctx.strokeStyle = '#4b5563';
+            ctx.lineWidth = 1.5;
+            ctx.fillRect(cx + 32, cy - 11, 44, 22);
+            ctx.strokeRect(cx + 32, cy - 11, 44, 22);
+
+            ctx.fillStyle = '#fde047';
+            ctx.font = 'bold 12px "JetBrains Mono", monospace';
+            ctx.fillText(state.kollsman.toFixed(2), cx + 54, cy + 1);
+
+            // 1. 10,000 ft Thin Pointer with outer triangle
+            const ang10k = ((indAlt / 100000) * Math.PI * 2) - Math.PI / 2;
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(ang10k);
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(r - 16, 0);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.8;
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(r - 4, 0);
+            ctx.lineTo(r - 16, -6);
+            ctx.lineTo(r - 16, 6);
+            ctx.closePath();
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            ctx.restore();
+
+            // 2. 1,000 ft Broad Short Pointer
+            const ang1k = (((indAlt % 10000) / 10000) * Math.PI * 2) - Math.PI / 2;
+            drawNeedle(ctx, cx, cy, ang1k, r - 48, 16, 7.5, '#ffffff');
+
+            // 3. 100 ft Long Pointer
+            const ang100 = (((indAlt % 1000) / 1000) * Math.PI * 2) - Math.PI / 2;
+            drawNeedle(ctx, cx, cy, ang100, r - 12, 22, 4.0, '#ffffff');
+        }
+
+        // ----------------------------------------------------------------------------
+        // 4. TURN COORDINATOR (TC) & Slip/Skid Inclinometer Ball
+        // ----------------------------------------------------------------------------
+        const tcCanvas = document.getElementById('tcCanvas');
+        const tcCtx = tcCanvas.getContext('2d');
+
+        function renderTC() {
+            const ctx = tcCtx;
+            const cx = 130, cy = 130, r = 115;
+            ctx.clearRect(0, 0, 260, 260);
+            drawInstrumentFrame(ctx, cx, cy, r);
+
+            // Standard Rate Marks (Level & 2-min turn L / R at ~20 degrees)
+            const marks = [-20, 0, 20, 160, 180, 200];
+            marks.forEach(deg => {
+                const rad = deg * (Math.PI / 180);
+                ctx.beginPath();
+                ctx.moveTo(cx + Math.cos(rad) * (r - 18), cy + Math.sin(rad) * (r - 18));
+                ctx.lineTo(cx + Math.cos(rad) * (r - 4), cy + Math.sin(rad) * (r - 4));
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 3.5;
+                ctx.stroke();
+            });
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 14px Inter, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('L', cx - r + 28, cy + 36);
+            ctx.fillText('R', cx + r - 28, cy + 36);
+
+            ctx.font = 'bold 10px Inter, sans-serif';
+            ctx.fillStyle = '#9ca3af';
+            ctx.fillText('2 MIN TURN', cx, cy - 48);
+            ctx.fillText('NO PITCH INFORMATION', cx, cy + 88);
+
+            // Slip/Skid Inclinometer Tube at bottom
+            const tubeY = cy + 54;
+            ctx.fillStyle = '#d1d5db';
+            ctx.strokeStyle = '#374151';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(cx - 52, tubeY - 11, 104, 22, 11);
+            ctx.fill();
+            ctx.stroke();
+
+            // Black Ball inside tube (moves with state.slipBall)
+            const ballX = cx + state.slipBall * 36;
+            ctx.beginPath();
+            ctx.arc(ballX, tubeY, 9, 0, Math.PI * 2);
+            ctx.fillStyle = '#111827';
+            ctx.fill();
+
+            // Two vertical reference wires ("Step on the ball" Lubber Lines)
+            ctx.beginPath();
+            ctx.moveTo(cx - 11, tubeY - 11);
+            ctx.lineTo(cx - 11, tubeY + 11);
+            ctx.moveTo(cx + 11, tubeY - 11);
+            ctx.lineTo(cx + 11, tubeY + 11);
+            ctx.strokeStyle = '#111827';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Miniature Airplane (Rotates proportionally to Turn Rate: 3.0 deg/sec = 20 deg tilt)
+            const planeTiltRad = Math.max(-35, Math.min(35, (state.turnRate / 3.0) * 20)) * (Math.PI / 180);
+            ctx.save();
+            ctx.translate(cx, cy - 4);
+            ctx.rotate(planeTiltRad);
+
+            ctx.strokeStyle = '#ffffff';
+            ctx.fillStyle = '#ffffff';
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+
+            // Wings
+            ctx.beginPath();
+            ctx.moveTo(-68, 0);
+            ctx.lineTo(68, 0);
+            ctx.stroke();
+
+            // Tail fin
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(0, -20);
+            ctx.stroke();
+
+            // Horizontal stabilizer
+            ctx.beginPath();
+            ctx.moveTo(-20, -14);
+            ctx.lineTo(20, -14);
+            ctx.lineWidth = 3;
+            ctx.stroke();
+
+            // Fuselage circle
+            ctx.beginPath();
+            ctx.arc(0, 0, 9, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        // ----------------------------------------------------------------------------
+        // 5. HEADING INDICATOR (HI / Directional Gyro)
+        // ----------------------------------------------------------------------------
+        const hiCanvas = document.getElementById('hiCanvas');
+        const hiCtx = hiCanvas.getContext('2d');
+
+        function renderHI() {
+            const ctx = hiCtx;
+            const cx = 130, cy = 130, r = 115;
+            ctx.clearRect(0, 0, 260, 260);
+            drawInstrumentFrame(ctx, cx, cy, r);
+
+            // Rotating Compass Card
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(-state.heading * (Math.PI / 180));
+
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = '#ffffff';
+            ctx.font = 'bold 15px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            for (let deg = 0; deg < 360; deg += 5) {
+                const rad = (deg - 90) * (Math.PI / 180);
+                const isMajor = (deg % 30 === 0);
+                const isTen = (deg % 10 === 0);
+                const innerR = isMajor ? r - 22 : (isTen ? r - 17 : r - 11);
+
+                ctx.beginPath();
+                ctx.moveTo(Math.cos(rad) * innerR, Math.sin(rad) * innerR);
+                ctx.lineTo(Math.cos(rad) * (r - 4), Math.sin(rad) * (r - 4));
+                ctx.lineWidth = isMajor ? 2.2 : 1.2;
+                ctx.stroke();
+
+                if (isMajor) {
+                    let label = (deg / 10).toString();
+                    if (deg === 0) label = 'N';
+                    else if (deg === 90) label = 'E';
+                    else if (deg === 180) label = 'S';
+                    else if (deg === 270) label = 'W';
+
+                    ctx.save();
+                    const tx = Math.cos(rad) * (r - 36);
+                    const ty = Math.sin(rad) * (r - 36);
+                    ctx.translate(tx, ty);
+                    ctx.rotate(deg * (Math.PI / 180));
+                    ctx.fillStyle = (deg % 90 === 0) ? '#38bdf8' : '#ffffff';
+                    ctx.fillText(label, 0, 0);
+                    ctx.restore();
+                }
+            }
+
+            // Heading Bug (Orange notched marker on perimeter)
+            const bugRad = (state.headingBug - 90) * (Math.PI / 180);
+            ctx.save();
+            ctx.rotate(bugRad);
+            ctx.fillStyle = '#f97316';
+            ctx.beginPath();
+            ctx.moveTo(r - 3, -8);
+            ctx.lineTo(r - 14, -8);
+            ctx.lineTo(r - 10, 0);
+            ctx.lineTo(r - 14, 8);
+            ctx.lineTo(r - 3, 8);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+
+            ctx.restore(); // End rotating compass card
+
+            // Fixed Airplane Symbol in center & Top Lubber Line
+            ctx.save();
+            ctx.translate(cx, cy);
+
+            // Top Lubber Line (Orange/White Index)
+            ctx.beginPath();
+            ctx.moveTo(0, -(r - 2));
+            ctx.lineTo(0, -(r - 20));
+            ctx.strokeStyle = '#f97316';
+            ctx.lineWidth = 3.5;
+            ctx.stroke();
+
+            // Center Reference Airplane Outline
+            ctx.strokeStyle = '#f3f4f6';
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            // Fuselage
+            ctx.moveTo(0, -34);
+            ctx.lineTo(0, 32);
+            // Wings
+            ctx.moveTo(-34, -4);
+            ctx.lineTo(34, -4);
+            // Tail
+            ctx.moveTo(-14, 24);
+            ctx.lineTo(14, 24);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // ----------------------------------------------------------------------------
+        // 6. VERTICAL SPEED INDICATOR (VSI) - ±2000 FPM
+        // ----------------------------------------------------------------------------
+        const vsiCanvas = document.getElementById('vsiCanvas');
+        const vsiCtx = vsiCanvas.getContext('2d');
+
+        // Map FPM (-2000 to +2000) to radians (0 FPM is at 9 o'clock = PI radians)
+        function fpmToAngle(fpm) {
+            const clamped = Math.max(-2000, Math.min(2000, fpm));
+            // 0 FPM is at 180 deg (left). +2000 is +170 deg clockwise, -2000 is -170 deg counter-clockwise
+            const deg = 180 + (clamped / 2000) * 168;
+            return deg * (Math.PI / 180);
+        }
+
+        function renderVSI() {
+            const ctx = vsiCtx;
+            const cx = 130, cy = 130, r = 115;
+            ctx.clearRect(0, 0, 260, 260);
+            drawInstrumentFrame(ctx, cx, cy, r);
+
+            ctx.fillStyle = '#f3f4f6';
+            ctx.font = 'bold 15px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            for (let f = -2000; f <= 2000; f += 100) {
+                const ang = fpmToAngle(f);
+                const isMajor = (Math.abs(f) % 500 === 0);
+                const innerR = isMajor ? r - 22 : r - 13;
+
+                ctx.beginPath();
+                ctx.moveTo(cx + Math.cos(ang) * innerR, cy + Math.sin(ang) * innerR);
+                ctx.lineTo(cx + Math.cos(ang) * (r - 4), cy + Math.sin(ang) * (r - 4));
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = isMajor ? 2.5 : 1.2;
+                ctx.stroke();
+
+                if (isMajor) {
+                    const label = (Math.abs(f) / 100).toString();
+                    const tx = cx + Math.cos(ang) * (r - 37);
+                    const ty = cy + Math.sin(ang) * (r - 37);
+                    ctx.fillText(label, tx, ty);
+                }
+            }
+
+            // UP / DN Labels
+            ctx.font = 'bold 11px Inter, sans-serif';
+            ctx.fillStyle = '#9ca3af';
+            ctx.fillText('VERTICAL SPEED', cx + 10, cy - 22);
+            ctx.fillText('100 FT PER MIN', cx + 10, cy + 22);
+            ctx.fillStyle = '#38bdf8';
+            ctx.fillText('▲ UP', cx - 35, cy - 38);
+            ctx.fillStyle = '#fbbf24';
+            ctx.fillText('▼ DN', cx - 35, cy + 38);
+
+            // Needle
+            drawNeedle(ctx, cx, cy, fpmToAngle(state.vsi), r - 14, 20, 4.0, '#ffffff');
+        }
+
+        // ----------------------------------------------------------------------------
+        // 7. ENGINE TACHOMETER (RPM) - Cessna 152 (Max 2550 RPM)
+        // ----------------------------------------------------------------------------
+        const rpmCanvas = document.getElementById('rpmCanvas');
+        const rpmCtx = rpmCanvas.getContext('2d');
+
+        function rpmToAngle(rpm) {
+            const clamped = Math.max(0, Math.min(3000, rpm));
+            // 0 RPM at 135 deg, 3000 RPM at 405 deg (270 deg sweep)
+            const deg = 135 + (clamped / 3000) * 270;
+            return deg * (Math.PI / 180);
+        }
+
+        function renderRPM() {
+            const ctx = rpmCtx;
+            const cx = 100, cy = 100, r = 88;
+            ctx.clearRect(0, 0, 200, 200);
+            drawInstrumentFrame(ctx, cx, cy, r);
+
+            // Green Arc (1900 to 2550 RPM - C152 Normal Operating Range)
+            ctx.beginPath();
+            ctx.arc(cx, cy, r - 9, rpmToAngle(1900), rpmToAngle(2550));
+            ctx.strokeStyle = '#10b981';
+            ctx.lineWidth = 7;
+            ctx.stroke();
+
+            // Red Line at 2550 RPM
+            const redAng = rpmToAngle(2550);
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(redAng);
+            ctx.beginPath();
+            ctx.moveTo(r - 20, 0);
+            ctx.lineTo(r - 2, 0);
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 3.5;
+            ctx.stroke();
+            ctx.restore();
+
+            // Ticks (0 to 30 hundreds)
+            ctx.fillStyle = '#f3f4f6';
+            ctx.font = 'bold 12px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            for (let rVal = 0; rVal <= 3000; rVal += 100) {
+                const ang = rpmToAngle(rVal);
+                const isMajor = (rVal % 500 === 0);
+                const innerR = isMajor ? r - 18 : r - 11;
+
+                ctx.beginPath();
+                ctx.moveTo(cx + Math.cos(ang) * innerR, cy + Math.sin(ang) * innerR);
+                ctx.lineTo(cx + Math.cos(ang) * (r - 3), cy + Math.sin(ang) * (r - 3));
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = isMajor ? 2 : 1;
+                ctx.stroke();
+
+                if (isMajor) {
+                    const tx = cx + Math.cos(ang) * (r - 30);
+                    const ty = cy + Math.sin(ang) * (r - 30);
+                    ctx.fillText((rVal / 100).toString(), tx, ty);
+                }
+            }
+
+            // Digital RPM Box at Bottom
+            ctx.fillStyle = '#090a0d';
+            ctx.strokeStyle = '#374151';
+            ctx.fillRect(cx - 28, cy + 28, 56, 20);
+            ctx.strokeRect(cx - 28, cy + 28, 56, 20);
+
+            ctx.fillStyle = state.rpm > 2550 ? '#ef4444' : '#10b981';
+            ctx.font = 'bold 12px "JetBrains Mono", monospace';
+            ctx.fillText(Math.round(state.rpm).toString(), cx, cy + 39);
+
+            ctx.fillStyle = '#9ca3af';
+            ctx.font = 'bold 9px Inter, sans-serif';
+            ctx.fillText('RPM x100', cx, cy - 22);
+
+            drawNeedle(ctx, cx, cy, rpmToAngle(state.rpm), r - 12, 15, 3.5, '#ffffff');
+        }
+
+        // ============================================================================
+        // USER INTERACTION & CONTROLS HANDLERS
+        // ============================================================================
+
+        // Sliders Event Listeners
+        const throttleSlider = document.getElementById('throttleSlider');
+        const pitchSlider = document.getElementById('pitchSlider');
+        const bankSlider = document.getElementById('bankSlider');
+        const rudderSlider = document.getElementById('rudderSlider');
+
+        throttleSlider.addEventListener('input', (e) => {
+            state.throttle = parseFloat(e.target.value) / 100;
+            document.getElementById('throttleVal').textContent = `${Math.round(state.throttle * 100)}%`;
+        });
+
+        pitchSlider.addEventListener('input', (e) => {
+            state.targetPitch = parseFloat(e.target.value);
+            document.getElementById('elevVal').textContent = (state.targetPitch >= 0 ? '+' : '') + state.targetPitch.toFixed(1) + '°';
+        });
+
+        bankSlider.addEventListener('input', (e) => {
+            state.targetBank = parseFloat(e.target.value);
+            document.getElementById('bankVal').textContent = (state.targetBank >= 0 ? '+' : '') + state.targetBank.toFixed(1) + '°';
+        });
+
+        rudderSlider.addEventListener('input', (e) => {
+            if (state.autoCoord) toggleAutoCoord(); // Switch to manual if user moves slider
+            state.rudder = parseFloat(e.target.value) / 100;
+            document.getElementById('rudderVal').textContent = `${Math.round(state.rudder * 100)}%`;
+        });
+
+        // Flaps Buttons (0, 10, 20, 30)
+        function setFlaps(deg) {
+            state.targetFlaps = deg;
+            document.getElementById('flapsLabel').textContent = deg === 0 ? '0° (UP)' : `${deg}° (DOWN)`;
+            [0, 10, 20, 30].forEach(d => {
+                const btn = document.getElementById('flapBtn' + d);
+                if (d === deg) {
+                    btn.className = "py-1.5 rounded-lg font-bold text-xs border transition bg-emerald-600 text-white border-emerald-400 shadow";
+                } else {
+                    btn.className = "py-1.5 rounded-lg font-bold text-xs border transition bg-zinc-800 text-gray-300 border-zinc-700 hover:bg-zinc-700";
+                }
+            });
+        }
+
+        // Kollsman Window & Heading Bug Knobs
+        function adjustKollsman(delta) {
+            state.kollsman = Math.max(28.00, Math.min(31.00, state.kollsman + delta));
+            document.getElementById('kollsmanVal').textContent = state.kollsman.toFixed(2);
+        }
+
+        function adjustHdgBug(delta) {
+            state.headingBug = (state.headingBug + delta + 360) % 360;
+            if (state.headingBug === 0) state.headingBug = 360;
+            document.getElementById('hdgBugVal').textContent = String(state.headingBug).padStart(3, '0') + '°';
+        }
+
+        function toggleAutoCoord() {
+            state.autoCoord = !state.autoCoord;
+            const btn = document.getElementById('autoCoordBtn');
+            if (state.autoCoord) {
+                btn.textContent = "自動ラダー (Auto Coord)";
+                btn.className = "text-[10px] px-2 py-0.5 rounded bg-emerald-700 border border-emerald-500 text-white";
+            } else {
+                btn.textContent = "手動ラダー (練習モード)";
+                btn.className = "text-[10px] px-2 py-0.5 rounded bg-zinc-800 border border-zinc-600 text-gray-300 hover:bg-zinc-700";
+            }
+        }
+
+        function centerYoke() {
+            syncControls(state.throttle, 1.5, 0, 0, state.targetFlaps);
+        }
+
+        // 2D Interactive Yoke Pad Dragging (Mouse & Touch)
+        const yokePad = document.getElementById('yokePad');
+        let isDraggingYoke = false;
+
+        function handleYokeMove(clientX, clientY) {
+            const rect = yokePad.getBoundingClientRect();
+            const relX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+            const relY = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+
+            // X: -60 to +60 deg Bank
+            const newBank = Math.round(((relX - 0.5) * 2) * 60);
+            // Y: Pulling down (relY > 0.5) pitches nose UP (+20 deg), pushing up pitches nose DOWN (-15 deg)
+            const newPitch = Math.round(((relY - 0.5) * 2) * 18 * 2) / 2;
+
+            state.targetBank = Math.max(-60, Math.min(60, newBank));
+            state.targetPitch = Math.max(-15, Math.min(20, newPitch));
+
+            bankSlider.value = state.targetBank;
+            pitchSlider.value = state.targetPitch;
+            document.getElementById('bankVal').textContent = (state.targetBank >= 0 ? '+' : '') + state.targetBank.toFixed(1) + '°';
+            document.getElementById('elevVal').textContent = (state.targetPitch >= 0 ? '+' : '') + state.targetPitch.toFixed(1) + '°';
+        }
+
+        yokePad.addEventListener('mousedown', (e) => { isDraggingYoke = true; handleYokeMove(e.clientX, e.clientY); });
+        window.addEventListener('mousemove', (e) => { if (isDraggingYoke) handleYokeMove(e.clientX, e.clientY); });
+        window.addEventListener('mouseup', () => { isDraggingYoke = false; });
+
+        yokePad.addEventListener('touchstart', (e) => {
+            isDraggingYoke = true;
+            handleYokeMove(e.touches[0].clientX, e.touches[0].clientY);
+            e.preventDefault();
+        }, { passive: false });
+        window.addEventListener('touchmove', (e) => {
+            if (isDraggingYoke) handleYokeMove(e.touches[0].clientX, e.touches[0].clientY);
+        }, { passive: false });
+        window.addEventListener('touchend', () => { isDraggingYoke = false; });
+
+        // Keyboard Shortcuts (Arrows for Pitch/Bank, W/S for Throttle, Z/X for Rudder)
+        window.addEventListener('keydown', (e) => {
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                e.preventDefault();
+            }
+            if (e.key === 'ArrowUp') {
+                // Push yoke forward -> pitch down
+                state.targetPitch = Math.max(-15, state.targetPitch - 0.5);
+            } else if (e.key === 'ArrowDown') {
+                // Pull yoke back -> pitch up
+                state.targetPitch = Math.min(20, state.targetPitch + 0.5);
+            } else if (e.key === 'ArrowLeft') {
+                state.targetBank = Math.max(-60, state.targetBank - 2);
+            } else if (e.key === 'ArrowRight') {
+                state.targetBank = Math.min(60, state.targetBank + 2);
+            } else if (e.key === 'w' || e.key === 'W') {
+                state.throttle = Math.min(1, state.throttle + 0.03);
+            } else if (e.key === 's' || e.key === 'S') {
+                state.throttle = Math.max(0, state.throttle - 0.03);
+            } else if (e.key === 'z' || e.key === 'Z') {
+                state.rudder = Math.max(-1, state.rudder - 0.06);
+            } else if (e.key === 'x' || e.key === 'X') {
+                state.rudder = Math.min(1, state.rudder + 0.06);
+            }
+            syncUIFromState();
+        });
+
+        function syncUIFromState() {
+            throttleSlider.value = Math.round(state.throttle * 100);
+            document.getElementById('throttleVal').textContent = `${Math.round(state.throttle * 100)}%`;
+
+            pitchSlider.value = state.targetPitch;
+            document.getElementById('elevVal').textContent = (state.targetPitch >= 0 ? '+' : '') + state.targetPitch.toFixed(1) + '°';
+
+            bankSlider.value = state.targetBank;
+            document.getElementById('bankVal').textContent = (state.targetBank >= 0 ? '+' : '') + state.targetBank.toFixed(1) + '°';
+
+            rudderSlider.value = Math.round(state.rudder * 100);
+            document.getElementById('rudderVal').textContent = `${Math.round(state.rudder * 100)}%`;
+        }
+
+        function syncControls(throttle, pitch, bank, rudder, flaps) {
+            state.throttle = throttle;
+            state.targetPitch = pitch;
+            state.pitch = pitch;
+            state.targetBank = bank;
+            state.bank = bank;
+            state.rudder = rudder;
+            setFlaps(flaps);
+            syncUIFromState();
+        }
+
+        // ============================================================================
+        // QUICK FLIGHT SITUATION PRESETS
+        // ============================================================================
+        function applyPreset(mode) {
+            if (mode === 'cruise') {
+                // Cruise: 2300 RPM, 95 KIAS, 3000 ft, Level Flight
+                state.ias = 95;
+                state.alt = 3000;
+                state.vsi = 0;
+                state.rpm = 2300;
+                syncControls(0.75, 1.5, 0, 0, 0);
+            } else if (mode === 'climb') {
+                // Normal Vy Climb: Full Throttle, 67 KIAS (Vy), +700 FPM, Slight Right Rudder for P-Factor
+                state.ias = 67;
+                state.vsi = 715;
+                state.rpm = 2480;
+                syncControls(1.0, 8.5, 0, 0.14, 0);
+            } else if (mode === 'approach') {
+                // Final Approach: Flaps 30°, 60 KIAS, -500 FPM Descent
+                state.ias = 60;
+                state.vsi = -500;
+                state.rpm = 1550;
+                syncControls(0.32, -2.5, 0, 0, 30);
+            } else if (mode === 'turn') {
+                // Standard Rate Turn (Right 15° Bank at 90 KIAS, 3000 ft)
+                state.ias = 90;
+                state.alt = 3000;
+                state.vsi = 0;
+                syncControls(0.78, 2.5, 15, 0.12, 0);
+            } else if (mode === 'slow') {
+                // Slow Flight / Near Stall: 41 KIAS (Stall Horn Active), High Pitch & Power
+                state.ias = 41;
+                state.vsi = 0;
+                syncControls(0.68, 11.5, 0, 0.18, 0);
+            }
+        }
+
+        // ============================================================================
+        // MAIN ANIMATION LOOP
+        // ============================================================================
+        function animate(now) {
+            updatePhysics(now);
+
+            renderASI();
+            renderAI();
+            renderALT();
+            renderTC();
+            renderHI();
+            renderVSI();
+            renderRPM();
+
+            requestAnimationFrame(animate);
+        }
+
+        window.onload = function () {
+            applyPreset('cruise');
+            requestAnimationFrame(animate);
+        };
+    </script>
+</body>
+</html>
